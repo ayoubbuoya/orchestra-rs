@@ -1,6 +1,8 @@
-[package]
-name = "orchestra-rs"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["orchestra-core"]
+resolver = "3"
 
-[dependencies]
+
+# Shared versions so all crates stay in sync:
+[workspace.dependencies]
+
