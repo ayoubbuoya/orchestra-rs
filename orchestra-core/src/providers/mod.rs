@@ -19,5 +19,15 @@ pub trait Provider {
         &self,
         model_config: ModelConfig,
         message: Message,
+        chat_history: Vec<Message>,
+    ) -> impl std::future::Future<Output = Result<ChatResponse, Error>> + Send;
+
+    /// Sends a prompt request to the provider.
+    /// INternally this just calls the chat function with a single message.
+    /// It is an async function that returns a future.
+    fn prompt(
+        &self,
+        model_config: ModelConfig,
+        prompt: String,
     ) -> impl std::future::Future<Output = Result<ChatResponse, Error>> + Send;
 }

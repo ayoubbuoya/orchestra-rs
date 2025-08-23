@@ -1,24 +1,27 @@
+#[derive(Debug, Clone)]
 pub enum Message {
     Human(HumanMessage),
-    Assistant(AsistantMessage),
+    Assistant(AssistantMessage),
     System(SystemMessage),
 }
 
+#[derive(Debug, Clone)]
 pub struct HumanMessage {
     pub content: String,
 }
 
-pub struct AsistantMessage {
+#[derive(Debug, Clone)]
+pub struct AssistantMessage {
     pub content: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct SystemMessage {
     pub content: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct MessageChatEntry {
     pub role: String,
     pub content: String,
 }
-
-
