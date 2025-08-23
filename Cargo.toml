@@ -3,6 +3,9 @@ members = ["orchestra-core"]
 resolver = "3"
 
 
+[workspace.package]
+edition = "2024"
+
 # Shared versions so all crates stay in sync:
 [workspace.dependencies]
 anyhow = "1.0.99"
