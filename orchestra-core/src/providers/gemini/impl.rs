@@ -87,8 +87,6 @@ impl Provider for GeminiProvider {
 
         let gemini_response: GeminiChatResponse = serde_json::from_str(&response_bod)?;
 
-        println!("Response: {:?}", gemini_response);
-
         Ok(ChatResponse {
             text: gemini_response.candidates[0].content.parts[0]
                 .text
@@ -155,5 +153,27 @@ mod tests {
 
         println!("Chat response with history: {}", resp.text);
         assert!(!resp.text.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_chat_with_system_instruction() {
+        let provider = GeminiProvider;
+        let model_config = crate::model::ModelConfig {
+            name: PREDEFINED_MODELS[0].to_string(),
+            system_instruction: Some("You are a helpful assistant that you'll add your name to the end of each response which is BuoyaAI.".to_string()),
+            temperature: 0.5,
+            top_p: 0.5,
+            thinking_mode: None,
+        };
+
+        let resp = provider
+            .prompt(model_config, "Hello how you doing today?".to_string())
+            .await
+            .unwrap();
+
+        println!("Chat response with system instruction: {}", resp.text);
+
+        assert!(!resp.text.is_empty());
+        assert!(resp.text.contains("BuoyaAI"));
     }
 }
