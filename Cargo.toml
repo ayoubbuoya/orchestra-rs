@@ -9,7 +9,8 @@ edition = "2024"
 # Shared versions so all crates stay in sync:
 [workspace.dependencies]
 anyhow = "1.0.99"
-reqwest = "0.12.23"
+reqwest = { version = "0.12.23", features = ["json"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.143"
 thiserror = "2.0.16"
+tokio = { version = "1.47.1", features = ["full"] }

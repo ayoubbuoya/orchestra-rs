@@ -15,3 +15,10 @@ pub struct AsistantMessage {
 pub struct SystemMessage {
     pub content: String,
 }
+
+pub struct MessageChatEntry {
+    pub role: String,
+    pub content: String,
+}
+
+

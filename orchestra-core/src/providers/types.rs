@@ -1,4 +1,7 @@
+use serde_json::Value;
+
 /// This is a list of all provider sources that are supported.
+#[derive(Debug, Clone, Copy)]
 pub enum ProviderSource {
     Gemini,
     OpenAI,
@@ -19,4 +22,9 @@ impl ProviderSource {
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatResponse {
+    pub content: String,
 }
