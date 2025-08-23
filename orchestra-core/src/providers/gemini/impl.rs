@@ -1,26 +1,20 @@
 use crate::{
     messages::Message,
-    providers::{Provider, types::ChatResponse},
+    providers::{Provider, gemini::types::GeminiChatResponse, types::ChatResponse},
 };
 
 use anyhow::{Error, Result};
 use reqwest::header::HeaderMap;
-use serde::{Deserialize, Serialize};
+
+use super::types::{
+    GeminiContent, GeminiRequestBody, GeminiRequestPart, PREDEFINED_MODELS, SystemInstruction,
+};
 
 pub struct GeminiProvider;
 
 impl GeminiProvider {
     pub const DEFAULT_API_KEY_ENV: &str = "GEMINI_API_KEY";
 }
-
-const PREDEFINED_MODELS: &[&str] = &[
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-1.5-pro",
-];
 
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -68,62 +62,16 @@ impl Provider for GeminiProvider {
 
         let response_bod = resp.text().await?;
 
-        println!("Response: {}", response_bod);
+        let gemini_response: GeminiChatResponse = serde_json::from_str(&response_bod)?;
+
+        println!("Response: {:?}", gemini_response);
 
         Ok(ChatResponse {
-            content: response_bod,
+            text: gemini_response.candidates[0].content.parts[0]
+                .text
+                .clone()
+                .unwrap_or_default(),
         })
-    }
-}
-
-pub struct GeminiGenerationConfig {
-    pub temperature: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeminiRequestBody {
-    pub system_instruction: Option<SystemInstruction>,
-    pub contents: Vec<GeminiContent>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SystemInstruction {
-    pub parts: Vec<GeminiRequestPart>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeminiContent {
-    pub role: String,
-    pub parts: Vec<GeminiRequestPart>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeminiRequestPart {
-    pub text: String,
-}
-
-impl From<&Message> for GeminiContent {
-    fn from(msg: &Message) -> Self {
-        match msg {
-            Message::Human(h) => GeminiContent {
-                role: "user".to_string(),
-                parts: vec![GeminiRequestPart {
-                    text: h.content.clone(),
-                }],
-            },
-            Message::Assistant(a) => GeminiContent {
-                role: "model".to_string(),
-                parts: vec![GeminiRequestPart {
-                    text: a.content.clone(),
-                }],
-            },
-            Message::System(s) => GeminiContent {
-                role: "system".to_string(),
-                parts: vec![GeminiRequestPart {
-                    text: s.content.clone(),
-                }],
-            },
-        }
     }
 }
 
@@ -144,11 +92,11 @@ mod tests {
         };
 
         let message = Message::Human(crate::messages::HumanMessage {
-            content: "Hello World".to_string(),
+            content: "Hello how you doing today?".to_string(),
         });
 
         let resp = provider.chat(model_config, message).await.unwrap();
 
-        assert!(!resp.content.is_empty());
+        assert!(!resp.text.is_empty());
     }
 }

@@ -26,5 +26,5 @@ impl ProviderSource {
 
 #[derive(Debug, Clone)]
 pub struct ChatResponse {
-    pub content: String,
+    pub text: String,
 }
