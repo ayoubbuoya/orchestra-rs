@@ -1,33 +1,54 @@
 use crate::{
-    messages::{HumanMessage, Message},
-    providers::{Provider, gemini::types::GeminiChatResponse, types::ChatResponse},
+    error::{OrchestraError, Result},
+    messages::Message,
+    providers::{Provider, config::GeminiConfig, gemini::types::GeminiChatResponse, types::ChatResponse},
 };
 
-use anyhow::{Error, Result};
+use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 
 use super::types::{
-    GeminiContent, GeminiRequestBody, GeminiRequestPart, PREDEFINED_MODELS, SystemInstruction,
+    GeminiContent, GeminiGenerationConfig, GeminiRequestBody, GeminiRequestPart, PREDEFINED_MODELS, SystemInstruction,
 };
 
-pub struct GeminiProvider;
+#[derive(Debug)]
+pub struct GeminiProvider {
+    config: GeminiConfig,
+}
 
 impl GeminiProvider {
     pub const DEFAULT_API_KEY_ENV: &str = "GEMINI_API_KEY";
+
+    /// Create a new GeminiProvider with default configuration
+    pub fn with_default_config() -> Self {
+        Self {
+            config: GeminiConfig::default(),
+        }
+    }
 }
 
-const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
-
+#[async_trait]
 impl Provider for GeminiProvider {
-    fn new() -> Self {
-        Self
+    type Config = GeminiConfig;
+
+    fn new(config: Self::Config) -> Self {
+        Self { config }
     }
 
     fn get_base_url(&self) -> &str {
-        BASE_URL
+        // We'll store the base URL in the provider for efficiency
+        "https://generativelanguage.googleapis.com/v1beta"
     }
 
-    fn get_predefined_models(&self) -> Result<Vec<String>, Error> {
+    fn name(&self) -> &'static str {
+        "gemini"
+    }
+
+    fn supports_tools(&self) -> bool {
+        true // Gemini supports function calling
+    }
+
+    fn get_predefined_models(&self) -> Result<Vec<String>> {
         Ok(PREDEFINED_MODELS.iter().map(|s| s.to_string()).collect())
     }
 
@@ -35,10 +56,10 @@ impl Provider for GeminiProvider {
         &self,
         model_config: crate::model::ModelConfig,
         prompt: String,
-    ) -> Result<ChatResponse, Error> {
+    ) -> Result<ChatResponse> {
         self.chat(
             model_config,
-            Message::Human(HumanMessage { content: prompt }),
+            Message::human(prompt),
             vec![],
         )
         .await
@@ -50,8 +71,8 @@ impl Provider for GeminiProvider {
         message: Message,
         chat_history: Vec<Message>,
     ) -> Result<ChatResponse> {
-        let api_key = std::env::var(Self::DEFAULT_API_KEY_ENV)
-            .map_err(|e| Error::msg(format!("Failed to get API key from environment: {}", e)))?;
+        let api_key = self.config.get_api_key()
+            .ok_or_else(|| OrchestraError::api_key("API key not found in configuration or environment"))?;
 
         let client = reqwest::Client::new();
 
@@ -64,20 +85,22 @@ impl Provider for GeminiProvider {
         let mut messages_to_send = chat_history.clone();
         messages_to_send.push(message);
 
-        let model_id = model_config.name;
-
-        let request_url = format!("{}/models/{}:generateContent", BASE_URL, model_id);
+        let model_id = &model_config.name;
+        let request_url = format!("{}/models/{}:generateContent", self.get_base_url(), model_id);
 
         let contents: Vec<GeminiContent> = messages_to_send
             .iter()
             .map(|m| GeminiContent::from(m))
             .collect();
 
+        let generation_config = GeminiGenerationConfig::from_model_config(&model_config);
+
         let request_body = GeminiRequestBody {
-            system_instruction: model_config.system_instruction.map(|s| SystemInstruction {
+            system_instruction: model_config.system_instruction.clone().map(|s| SystemInstruction {
                 parts: vec![GeminiRequestPart { text: s }],
             }),
             contents,
+            generation_config: Some(generation_config),
         };
 
         let resp = client
@@ -87,15 +110,40 @@ impl Provider for GeminiProvider {
             .send()
             .await?;
 
-        let response_bod = resp.text().await?;
+        // Check for HTTP errors
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let error_body = resp.text().await.unwrap_or_default();
+            return Err(OrchestraError::provider(
+                "gemini",
+                &format!("HTTP {} error: {}", status, error_body),
+            ));
+        }
 
-        let gemini_response: GeminiChatResponse = serde_json::from_str(&response_bod)?;
+        let response_body = resp.text().await?;
+
+        let gemini_response: GeminiChatResponse = serde_json::from_str(&response_body)?;
+
+        // Check for API errors in the response
+        if let Some(error) = gemini_response.error {
+            return Err(OrchestraError::provider(
+                "gemini",
+                &format!("API error {}: {} ({})", error.code, error.message, error.status),
+            ));
+        }
+
+        // Better error handling for response structure
+        let candidate = gemini_response.candidates.first()
+            .ok_or_else(|| OrchestraError::invalid_response("No candidates in response"))?;
+
+        let part = candidate.content.parts.first()
+            .ok_or_else(|| OrchestraError::invalid_response("No parts in response content"))?;
+
+        let text = part.text.as_ref()
+            .ok_or_else(|| OrchestraError::invalid_response("No text in response part"))?;
 
         Ok(ChatResponse {
-            text: gemini_response.candidates[0].content.parts[0]
-                .text
-                .clone()
-                .unwrap_or_default(),
+            text: text.clone(),
         })
     }
 }
@@ -103,18 +151,16 @@ impl Provider for GeminiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{AssistantMessage, HumanMessage, Message};
+    use crate::messages::Message;
 
     #[tokio::test]
     async fn test_prompt() {
-        let provider = GeminiProvider;
-        let model_config = crate::model::ModelConfig {
-            name: PREDEFINED_MODELS[0].to_string(),
-            system_instruction: None,
-            temperature: 0.5,
-            top_p: 0.5,
-            thinking_mode: None,
-        };
+        let provider = GeminiProvider::with_default_config();
+        let model_config = crate::model::ModelConfig::new(PREDEFINED_MODELS[0])
+            .with_temperature(0.5)
+            .unwrap()
+            .with_top_p(0.5)
+            .unwrap();
 
         let resp = provider
             .prompt(model_config, "Hello how you doing today?".to_string())
@@ -126,29 +172,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_chat_with_history() {
-        let provider = GeminiProvider;
-        let model_config = crate::model::ModelConfig {
-            name: PREDEFINED_MODELS[0].to_string(),
-            system_instruction: None,
-            temperature: 0.5,
-            top_p: 0.5,
-            thinking_mode: None,
-        };
+        let provider = GeminiProvider::with_default_config();
+        let model_config = crate::model::ModelConfig::new(PREDEFINED_MODELS[0])
+            .with_temperature(0.5)
+            .unwrap()
+            .with_top_p(0.5)
+            .unwrap();
 
         // Simulate previous conversation history
         let history = vec![
-            Message::Human(HumanMessage {
-                content: "Hi, I'm Ayoub. I need you to remember my name when I ask for.".into(),
-            }),
-            Message::Assistant(AssistantMessage {
-                content: "Got it!".into(),
-            }),
+            Message::human("Hi, I'm Ayoub. I need you to remember my name when I ask for."),
+            Message::assistant("Got it!"),
         ];
 
         // New user message
-        let new_message = Message::Human(HumanMessage {
-            content: "What is My Name ?".into(),
-        });
+        let new_message = Message::human("What is My Name ?");
 
         let resp = provider
             .chat(model_config, new_message, history)
@@ -161,14 +199,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_chat_with_system_instruction() {
-        let provider = GeminiProvider;
-        let model_config = crate::model::ModelConfig {
-            name: PREDEFINED_MODELS[0].to_string(),
-            system_instruction: Some("You are a helpful assistant that you'll add your name to the end of each response which is BuoyaAI.".to_string()),
-            temperature: 0.5,
-            top_p: 0.5,
-            thinking_mode: None,
-        };
+        let provider = GeminiProvider::with_default_config();
+        let model_config = crate::model::ModelConfig::new(PREDEFINED_MODELS[0])
+            .with_system_instruction("You are a helpful assistant that you'll add your name to the end of each response which is BuoyaAI.")
+            .with_temperature(0.5)
+            .unwrap()
+            .with_top_p(0.5)
+            .unwrap();
 
         let resp = provider
             .prompt(model_config, "Hello how you doing today?".to_string())

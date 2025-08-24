@@ -15,6 +15,8 @@ pub const PREDEFINED_MODELS: &[&str] = &[
 pub struct GeminiRequestBody {
     pub system_instruction: Option<SystemInstruction>,
     pub contents: Vec<GeminiContent>,
+    #[serde(rename = "generationConfig", skip_serializing_if = "Option::is_none")]
+    pub generation_config: Option<GeminiGenerationConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,8 +35,34 @@ pub struct GeminiRequestPart {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiGenerationConfig {
-    pub temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(rename = "topP", skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(rename = "topK", skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
+    #[serde(rename = "maxOutputTokens", skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+    #[serde(rename = "stopSequences", skip_serializing_if = "Option::is_none")]
+    pub stop_sequences: Option<Vec<String>>,
+}
+
+impl GeminiGenerationConfig {
+    pub fn from_model_config(config: &crate::model::ModelConfig) -> Self {
+        Self {
+            temperature: Some(config.temperature),
+            top_p: Some(config.top_p),
+            top_k: config.top_k,
+            max_output_tokens: config.max_tokens,
+            stop_sequences: if config.stop_sequences.is_empty() {
+                None
+            } else {
+                Some(config.stop_sequences.clone())
+            },
+        }
+    }
 }
 
 impl From<&Message> for GeminiContent {
@@ -43,13 +71,13 @@ impl From<&Message> for GeminiContent {
             Message::Human(h) => GeminiContent {
                 role: "user".to_string(),
                 parts: vec![GeminiRequestPart {
-                    text: h.content.clone(),
+                    text: h.content.to_text(),
                 }],
             },
             Message::Assistant(a) => GeminiContent {
                 role: "model".to_string(),
                 parts: vec![GeminiRequestPart {
-                    text: a.content.clone(),
+                    text: a.content.to_text(),
                 }],
             },
             Message::System(s) => GeminiContent {
@@ -71,6 +99,14 @@ pub struct GeminiChatResponse {
     pub model_version: Option<String>,
     #[serde(rename = "responseId")]
     pub response_id: Option<String>,
+    pub error: Option<GeminiError>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GeminiError {
+    pub code: u32,
+    pub message: String,
+    pub status: String,
 }
 
 #[derive(Debug, Deserialize)]

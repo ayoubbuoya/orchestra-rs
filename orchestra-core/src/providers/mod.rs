@@ -1,35 +1,59 @@
+pub mod config;
 pub mod gemini;
+#[cfg(test)]
+pub mod mock;
 pub mod types;
 
-use anyhow::{Error, Result};
+use async_trait::async_trait;
 
-use crate::{messages::Message, model::ModelConfig, providers::types::ChatResponse};
+use crate::{
+    error::Result,
+    messages::Message,
+    model::ModelConfig,
+    providers::types::ChatResponse
+};
 
 /// A trait for all providers to implement.
-pub trait Provider: Sized {
-    fn new() -> Self;
+#[async_trait]
+pub trait Provider: Send + Sync + std::fmt::Debug {
+    /// The configuration type for this provider
+    type Config: Send + Sync + std::fmt::Debug;
+
+    /// Create a new provider instance with the given configuration
+    fn new(config: Self::Config) -> Self;
 
     /// Gets base url used for all requests.
     fn get_base_url(&self) -> &str;
 
     /// Get a list of all predefined models for this provider.
-    fn get_predefined_models(&self) -> Result<Vec<String>, Error>;
+    fn get_predefined_models(&self) -> Result<Vec<String>>;
 
     /// Sends a chat request to the provider.
-    /// It is an async function that returns a future.
-    fn chat(
+    async fn chat(
         &self,
         model_config: ModelConfig,
         message: Message,
         chat_history: Vec<Message>,
-    ) -> impl std::future::Future<Output = Result<ChatResponse, Error>> + Send;
+    ) -> Result<ChatResponse>;
 
     /// Sends a prompt request to the provider.
-    /// INternally this just calls the chat function with a single message.
-    /// It is an async function that returns a future.
-    fn prompt(
+    /// Internally this just calls the chat function with a single message.
+    async fn prompt(
         &self,
         model_config: ModelConfig,
         prompt: String,
-    ) -> impl std::future::Future<Output = Result<ChatResponse, Error>> + Send;
+    ) -> Result<ChatResponse>;
+
+    /// Get the provider's name
+    fn name(&self) -> &'static str;
+
+    /// Check if the provider supports streaming responses
+    fn supports_streaming(&self) -> bool {
+        false
+    }
+
+    /// Check if the provider supports tool calling
+    fn supports_tools(&self) -> bool {
+        false
+    }
 }
