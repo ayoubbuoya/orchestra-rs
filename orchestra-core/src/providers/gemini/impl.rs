@@ -1,9 +1,11 @@
 use crate::{
     error::{OrchestraError, Result},
-    messages::Message,
+    messages::{Message, ToolCall, ToolFunction},
     providers::{
-        Provider, config::GeminiConfig, gemini::types::GeminiChatResponse, types::ChatResponse,
+        Provider, config::GeminiConfig, gemini::types::GeminiChatResponse,
+        types::{ChatResponse, ChatResponseMetadata, TokenUsage},
     },
+    tools::ToolDefinition,
 };
 
 use async_trait::async_trait;
@@ -102,11 +104,12 @@ impl Provider for GeminiProvider {
         let request_body = GeminiRequestBody {
             system_instruction: model_config.system_instruction.clone().map(|s| {
                 SystemInstruction {
-                    parts: vec![GeminiRequestPart { text: s }],
+                    parts: vec![GeminiRequestPart::text(s)],
                 }
             }),
             contents,
             generation_config: Some(generation_config),
+            tools: None, // No tools for regular chat
         };
 
         let resp = client
@@ -160,7 +163,148 @@ impl Provider for GeminiProvider {
             .as_ref()
             .ok_or_else(|| OrchestraError::invalid_response("No text in response part"))?;
 
-        Ok(ChatResponse { text: text.clone() })
+        Ok(ChatResponse::text(text.clone()))
+    }
+
+    /// Implementation of chat_with_tools for Gemini provider
+    ///
+    /// This method extends the regular chat functionality to support tool calling.
+    /// It sends tool definitions to Gemini and parses any tool calls in the response.
+    async fn chat_with_tools(
+        &self,
+        model_config: crate::model::ModelConfig,
+        message: Message,
+        chat_history: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ChatResponse> {
+        let api_key = self.config.get_api_key().ok_or_else(|| {
+            OrchestraError::api_key("API key not found in configuration or environment")
+        })?;
+
+        let client = reqwest::Client::new();
+
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("x-goog-api-key", api_key.parse()?);
+        headers.insert("Content-Type", "application/json".parse()?);
+
+        // Combine history + new_message
+        let mut messages_to_send = chat_history.clone();
+        messages_to_send.push(message);
+
+        let model_id = &model_config.name;
+        let request_url = format!(
+            "{}/models/{}:generateContent",
+            self.get_base_url(),
+            model_id
+        );
+
+        let contents: Vec<super::types::GeminiContent> = messages_to_send
+            .iter()
+            .map(|m| super::types::GeminiContent::from(m))
+            .collect();
+
+        let generation_config = super::types::GeminiGenerationConfig::from_model_config(&model_config);
+
+        // Convert tools to Gemini format
+        let gemini_tools = if tools.is_empty() {
+            None
+        } else {
+            Some(vec![super::types::GeminiTool::from(tools)])
+        };
+
+        let request_body = super::types::GeminiRequestBody {
+            system_instruction: model_config.system_instruction.clone().map(|s| {
+                super::types::SystemInstruction {
+                    parts: vec![super::types::GeminiRequestPart::text(s)],
+                }
+            }),
+            contents,
+            generation_config: Some(generation_config),
+            tools: gemini_tools,
+        };
+
+        let resp = client
+            .post(request_url)
+            .headers(headers)
+            .json(&request_body)
+            .send()
+            .await?;
+
+        // Check for HTTP errors
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let error_body = resp.text().await.unwrap_or_default();
+            return Err(OrchestraError::provider(
+                "gemini",
+                &format!("HTTP {} error: {}", status, error_body),
+            ));
+        }
+
+        let response_body: GeminiChatResponse = resp.json().await?;
+
+        // Check for API errors
+        if let Some(error) = response_body.error {
+            return Err(OrchestraError::provider(
+                "gemini",
+                &format!("Gemini API error {}: {}", error.code, error.message),
+            ));
+        }
+
+        // Extract the response
+        let candidate = response_body
+            .candidates
+            .first()
+            .ok_or_else(|| OrchestraError::invalid_response("No candidates in response"))?;
+
+        let content = &candidate.content;
+
+        // Parse response parts for text and function calls
+        let mut response_text = String::new();
+        let mut tool_calls = Vec::new();
+
+        for (index, part) in content.parts.iter().enumerate() {
+            if let Some(text) = &part.text {
+                if !response_text.is_empty() {
+                    response_text.push(' ');
+                }
+                response_text.push_str(text);
+            }
+
+            if let Some(function_call) = &part.function_call {
+                tool_calls.push(ToolCall {
+                    id: format!("call_{}", index), // Generate a unique ID
+                    call_id: Some(format!("call_{}", index)),
+                    function: ToolFunction {
+                        name: function_call.name.clone(),
+                        arguments: function_call.args.clone(),
+                    },
+                });
+            }
+        }
+
+        // Create metadata
+        let metadata = ChatResponseMetadata {
+            usage: response_body.usage_metadata.map(|usage| TokenUsage {
+                prompt_tokens: usage.prompt_token_count,
+                completion_tokens: usage.candidates_token_count,
+                total_tokens: usage.total_token_count,
+            }),
+            model: response_body.model_version,
+            response_id: response_body.response_id,
+            processing_time_ms: None, // We don't track this currently
+            finish_reason: candidate.finish_reason.clone(),
+        };
+
+        // Create the response
+        let mut response = if tool_calls.is_empty() {
+            ChatResponse::text(response_text)
+        } else {
+            ChatResponse::with_tool_calls(response_text, tool_calls)
+        };
+
+        response = response.with_metadata(metadata);
+
+        Ok(response)
     }
 }
 

@@ -50,6 +50,7 @@ use crate::{
         gemini::GeminiProvider,
         types::{ChatResponse, ProviderSource},
     },
+    tools::{ToolDefinition, ToolRegistry, ToolExecutor},
 };
 
 /// Enum to hold different provider implementations
@@ -261,6 +262,183 @@ impl LLM {
         match &self.provider {
             ProviderInstance::Gemini(provider) => provider.supports_tools(),
         }
+    }
+
+    /// Send a prompt with tool definitions
+    ///
+    /// This method allows the LLM to call tools as part of its response.
+    /// The LLM will receive the tool definitions and can choose to call them
+    /// based on the prompt.
+    ///
+    /// # Arguments
+    /// * `prompt` - The text prompt to send to the LLM
+    /// * `tools` - Available tools that the LLM can call
+    ///
+    /// # Returns
+    /// A `ChatResponse` that may contain tool calls to execute
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use orchestra_core::{
+    ///     llm::LLM,
+    ///     tools::{ToolDefinition, ToolParameter, ToolParameterType}
+    /// };
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let llm = LLM::gemini("gemini-2.5-flash");
+    ///
+    ///     let weather_tool = ToolDefinition::new(
+    ///         "get_weather",
+    ///         "Get current weather for a location"
+    ///     ).with_parameter(
+    ///         ToolParameter::new("location", ToolParameterType::String)
+    ///             .with_description("The city and country")
+    ///             .required()
+    ///     );
+    ///
+    ///     let response = llm.prompt_with_tools(
+    ///         "What's the weather like in Paris?",
+    ///         vec![weather_tool]
+    ///     ).await?;
+    ///
+    ///     if response.has_tool_calls() {
+    ///         println!("LLM wants to call tools: {:?}", response.get_tool_calls());
+    ///     } else {
+    ///         println!("Response: {}", response.text);
+    ///     }
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn prompt_with_tools<S: Into<String>>(
+        &self,
+        prompt: S,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ChatResponse> {
+        let config = self.config.clone();
+
+        match &self.provider {
+            ProviderInstance::Gemini(provider) => {
+                provider.prompt_with_tools(config, prompt.into(), tools).await
+            }
+        }
+    }
+
+    /// Send a chat message with tool definitions
+    ///
+    /// This extends the regular chat functionality to include tool calling.
+    /// The LLM can call tools as part of the conversation.
+    ///
+    /// # Arguments
+    /// * `message` - The message to send
+    /// * `history` - Previous messages in the conversation
+    /// * `tools` - Available tools that the LLM can call
+    ///
+    /// # Returns
+    /// A `ChatResponse` that may contain tool calls to execute
+    pub async fn chat_with_tools(
+        &self,
+        message: Message,
+        history: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ChatResponse> {
+        let config = self.config.clone();
+
+        match &self.provider {
+            ProviderInstance::Gemini(provider) => {
+                provider.chat_with_tools(config, message, history, tools).await
+            }
+        }
+    }
+
+    /// Create a tool executor for this LLM
+    ///
+    /// This creates a ToolExecutor that can be used to execute tool calls
+    /// returned by the LLM. The executor handles parameter validation,
+    /// error handling, and result formatting.
+    ///
+    /// # Arguments
+    /// * `registry` - The tool registry containing available tools
+    ///
+    /// # Returns
+    /// A configured ToolExecutor
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use orchestra_core::{llm::LLM, tools::ToolRegistry};
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let llm = LLM::gemini("gemini-2.5-flash");
+    ///     let registry = ToolRegistry::new();
+    ///
+    ///     let executor = llm.create_tool_executor(registry);
+    ///
+    ///     // Use the executor to run tool calls from LLM responses
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn create_tool_executor(&self, registry: ToolRegistry) -> ToolExecutor {
+        ToolExecutor::new(registry)
+            .with_timeout(std::time::Duration::from_secs(30))
+            .with_validation(true)
+            .with_timing(true)
+    }
+
+    /// Execute a complete tool calling workflow
+    ///
+    /// This is a high-level method that combines prompting with tools,
+    /// executing any tool calls, and optionally continuing the conversation
+    /// with the tool results.
+    ///
+    /// # Arguments
+    /// * `prompt` - The initial prompt
+    /// * `tools` - Available tools
+    /// * `registry` - Tool registry for execution
+    /// * `auto_execute` - Whether to automatically execute tool calls
+    ///
+    /// # Returns
+    /// A tuple of (final_response, tool_results)
+    ///
+    /// ## For Rust Beginners
+    ///
+    /// This method demonstrates several advanced Rust concepts:
+    /// - Async programming with multiple await points
+    /// - Error handling with the `?` operator
+    /// - Tuple return types
+    /// - Option handling with pattern matching
+    pub async fn prompt_with_tool_execution<S: Into<String>>(
+        &self,
+        prompt: S,
+        tools: Vec<ToolDefinition>,
+        registry: ToolRegistry,
+        auto_execute: bool,
+    ) -> Result<(ChatResponse, Vec<crate::tools::ToolResult>)> {
+        let prompt_str = prompt.into();
+
+        // First, send the prompt with tools
+        let response = self.prompt_with_tools(&prompt_str, tools.clone()).await?;
+
+        // If no tool calls or auto_execute is false, return early
+        if !response.has_tool_calls() || !auto_execute {
+            return Ok((response, vec![]));
+        }
+
+        // Execute tool calls
+        let executor = self.create_tool_executor(registry);
+        let mut tool_results = Vec::new();
+
+        for tool_call in response.get_tool_calls() {
+            let result = executor.execute(&tool_call.function.name, tool_call.function.arguments.clone()).await?;
+            tool_results.push(result);
+        }
+
+        // TODO: In a complete implementation, we would send the tool results
+        // back to the LLM to get a final response. For now, we return the
+        // original response and the tool results.
+
+        Ok((response, tool_results))
     }
 }
 

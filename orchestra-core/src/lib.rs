@@ -48,6 +48,7 @@ pub mod llm;
 pub mod messages;
 pub mod model;
 pub mod providers;
+pub mod tools;
 
 // Re-export commonly used types
 pub use error::{OrchestraError, Result};

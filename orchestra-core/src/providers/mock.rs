@@ -127,9 +127,7 @@ impl Provider for MockProvider {
             tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
         }
 
-        Ok(ChatResponse {
-            text: self.get_next_response(),
-        })
+        Ok(ChatResponse::text(self.get_next_response()))
     }
 
     async fn prompt(

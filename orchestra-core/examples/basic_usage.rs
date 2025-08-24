@@ -89,8 +89,7 @@ async fn custom_configuration() -> Result<()> {
         .with_system_instruction("You are a helpful Rust programming tutor. Always provide practical examples and explain concepts clearly.")
         .with_temperature(0.7)?
         .with_top_p(0.9)?
-        .with_max_tokens(500)
-        .with_stop_sequence("---");
+        .with_max_tokens(8000);
 
     // Create LLM with custom configuration
     let llm =
