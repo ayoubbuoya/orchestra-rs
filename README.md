@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Advanced Configuration
 
-```rust
+````rust
 use orchestra_core::{
     llm::LLM,
     providers::types::ProviderSource,
@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-```
+````
 
 ### Chat with History
 
@@ -156,6 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Google Gemini
 
 Currently supported models:
+
 - `gemini-2.5-flash-lite`
 - `gemini-2.5-pro`
 - `gemini-2.5-flash`
@@ -164,10 +165,12 @@ Currently supported models:
 - `gemini-1.5-pro`
 
 **Setup:**
+
 1. Get an API key from [Google AI Studio](https://aistudio.google.com/)
 2. Set the environment variable: `GEMINI_API_KEY=your-api-key`
 
 ### Coming Soon
+
 - OpenAI GPT models
 - Anthropic Claude
 - Local models via Ollama
@@ -222,6 +225,10 @@ async fn test_my_ai_function() {
     // Use the mock provider in your tests
 }
 ```
+
+## Architecture Documentation
+
+For a detailed overview of the library's architecture, please refer to the [architecture documentation](architecture.md).
 
 ## Project Status
 
