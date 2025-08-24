@@ -45,7 +45,11 @@ use crate::{
     error::Result,
     messages::Message,
     model::ModelConfig,
-    providers::{Provider, gemini::GeminiProvider, types::{ProviderSource, ChatResponse}},
+    providers::{
+        Provider,
+        gemini::GeminiProvider,
+        types::{ChatResponse, ProviderSource},
+    },
 };
 
 /// Enum to hold different provider implementations
@@ -82,8 +86,6 @@ pub enum ProviderInstance {
 pub struct LLM {
     /// The provider source (e.g., Gemini, OpenAI)
     pub provider_source: ProviderSource,
-    /// The name of the model to use
-    pub model_name: String,
     /// The provider instance
     pub provider: ProviderInstance,
     /// Model configuration settings
@@ -96,13 +98,14 @@ impl LLM {
         let default_model_config = ModelConfig::new(&model_name);
 
         let provider = match provider_source {
-            ProviderSource::Gemini => ProviderInstance::Gemini(GeminiProvider::with_default_config()),
+            ProviderSource::Gemini => {
+                ProviderInstance::Gemini(GeminiProvider::with_default_config())
+            }
             _ => panic!("Unsupported provider source"),
         };
 
         LLM {
             provider_source,
-            model_name,
             provider,
             config: default_model_config,
         }
@@ -157,7 +160,7 @@ impl LLM {
     }
 
     pub fn get_model_name(&self) -> &str {
-        &self.model_name
+        &self.config.name
     }
 
     /// Send a prompt to the LLM and get a response.
@@ -187,8 +190,7 @@ impl LLM {
     /// }
     /// ```
     pub async fn prompt<S: Into<String>>(&self, prompt: S) -> Result<ChatResponse> {
-        let mut config = self.config.clone();
-        config.name = self.model_name.clone();
+        let config = self.config.clone();
 
         match &self.provider {
             ProviderInstance::Gemini(provider) => provider.prompt(config, prompt.into()).await,
@@ -233,8 +235,7 @@ impl LLM {
     /// }
     /// ```
     pub async fn chat(&self, message: Message, history: Vec<Message>) -> Result<ChatResponse> {
-        let mut config = self.config.clone();
-        config.name = self.model_name.clone();
+        let config = self.config.clone();
 
         match &self.provider {
             ProviderInstance::Gemini(provider) => provider.chat(config, message, history).await,

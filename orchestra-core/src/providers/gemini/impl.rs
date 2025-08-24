@@ -1,14 +1,17 @@
 use crate::{
     error::{OrchestraError, Result},
     messages::Message,
-    providers::{Provider, config::GeminiConfig, gemini::types::GeminiChatResponse, types::ChatResponse},
+    providers::{
+        Provider, config::GeminiConfig, gemini::types::GeminiChatResponse, types::ChatResponse,
+    },
 };
 
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 
 use super::types::{
-    GeminiContent, GeminiGenerationConfig, GeminiRequestBody, GeminiRequestPart, PREDEFINED_MODELS, SystemInstruction,
+    GeminiContent, GeminiGenerationConfig, GeminiRequestBody, GeminiRequestPart, PREDEFINED_MODELS,
+    SystemInstruction,
 };
 
 #[derive(Debug)]
@@ -57,12 +60,8 @@ impl Provider for GeminiProvider {
         model_config: crate::model::ModelConfig,
         prompt: String,
     ) -> Result<ChatResponse> {
-        self.chat(
-            model_config,
-            Message::human(prompt),
-            vec![],
-        )
-        .await
+        self.chat(model_config, Message::human(prompt), vec![])
+            .await
     }
 
     async fn chat(
@@ -71,8 +70,9 @@ impl Provider for GeminiProvider {
         message: Message,
         chat_history: Vec<Message>,
     ) -> Result<ChatResponse> {
-        let api_key = self.config.get_api_key()
-            .ok_or_else(|| OrchestraError::api_key("API key not found in configuration or environment"))?;
+        let api_key = self.config.get_api_key().ok_or_else(|| {
+            OrchestraError::api_key("API key not found in configuration or environment")
+        })?;
 
         let client = reqwest::Client::new();
 
@@ -86,7 +86,11 @@ impl Provider for GeminiProvider {
         messages_to_send.push(message);
 
         let model_id = &model_config.name;
-        let request_url = format!("{}/models/{}:generateContent", self.get_base_url(), model_id);
+        let request_url = format!(
+            "{}/models/{}:generateContent",
+            self.get_base_url(),
+            model_id
+        );
 
         let contents: Vec<GeminiContent> = messages_to_send
             .iter()
@@ -96,8 +100,10 @@ impl Provider for GeminiProvider {
         let generation_config = GeminiGenerationConfig::from_model_config(&model_config);
 
         let request_body = GeminiRequestBody {
-            system_instruction: model_config.system_instruction.clone().map(|s| SystemInstruction {
-                parts: vec![GeminiRequestPart { text: s }],
+            system_instruction: model_config.system_instruction.clone().map(|s| {
+                SystemInstruction {
+                    parts: vec![GeminiRequestPart { text: s }],
+                }
             }),
             contents,
             generation_config: Some(generation_config),
@@ -122,29 +128,39 @@ impl Provider for GeminiProvider {
 
         let response_body = resp.text().await?;
 
+        println!("Response body: {}", response_body);
+
         let gemini_response: GeminiChatResponse = serde_json::from_str(&response_body)?;
 
         // Check for API errors in the response
         if let Some(error) = gemini_response.error {
             return Err(OrchestraError::provider(
                 "gemini",
-                &format!("API error {}: {} ({})", error.code, error.message, error.status),
+                &format!(
+                    "API error {}: {} ({})",
+                    error.code, error.message, error.status
+                ),
             ));
         }
 
         // Better error handling for response structure
-        let candidate = gemini_response.candidates.first()
+        let candidate = gemini_response
+            .candidates
+            .first()
             .ok_or_else(|| OrchestraError::invalid_response("No candidates in response"))?;
 
-        let part = candidate.content.parts.first()
+        let part = candidate
+            .content
+            .parts
+            .first()
             .ok_or_else(|| OrchestraError::invalid_response("No parts in response content"))?;
 
-        let text = part.text.as_ref()
+        let text = part
+            .text
+            .as_ref()
             .ok_or_else(|| OrchestraError::invalid_response("No text in response part"))?;
 
-        Ok(ChatResponse {
-            text: text.clone(),
-        })
+        Ok(ChatResponse { text: text.clone() })
     }
 }
 
