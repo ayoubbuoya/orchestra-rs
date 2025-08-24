@@ -1,4 +1,4 @@
-mod gemini;
+pub mod gemini;
 pub mod types;
 
 use anyhow::{Error, Result};
@@ -6,7 +6,9 @@ use anyhow::{Error, Result};
 use crate::{messages::Message, model::ModelConfig, providers::types::ChatResponse};
 
 /// A trait for all providers to implement.
-pub trait Provider {
+pub trait Provider: Sized {
+    fn new() -> Self;
+
     /// Gets base url used for all requests.
     fn get_base_url(&self) -> &str;
 

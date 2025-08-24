@@ -19,6 +19,10 @@ impl GeminiProvider {
 const BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
 impl Provider for GeminiProvider {
+    fn new() -> Self {
+        Self
+    }
+
     fn get_base_url(&self) -> &str {
         BASE_URL
     }
