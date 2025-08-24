@@ -16,7 +16,9 @@ The goal of **Orchestra-rs** is to be the `LangChain` of the Rust ecosystem. We 
 - 🚀 **Type-safe LLM interactions** - Leverage Rust's type system for reliable AI applications
 - 🔌 **Multiple provider support** - Currently supports Google Gemini, with more providers coming
 - 🛠️ **Flexible configuration** - Builder patterns and validation for model configurations
-- 📝 **Rich message types** - Support for text, mixed content, and future tool calling
+- 📝 **Rich message types** - Support for text, mixed content, and tool calling
+- 🔧 **Comprehensive tool calling** - Define, register, and execute tools with LLMs
+- 🛠️ **Built-in tools** - Calculator, timestamp, random number generation, and more
 - 🧪 **Comprehensive testing** - Built-in mock providers and extensive test coverage
 - ⚡ **Async/await support** - Built for modern async Rust applications
 - 🔒 **Error handling** - Comprehensive error types with context
@@ -236,13 +238,131 @@ For a detailed overview of the library's architecture, please refer to the [arch
 
 Orchestra-rs is in active development. The core APIs are stabilizing, but may still change. This is a great time to get involved and help shape the future of the framework.
 
+## Tool Calling
+
+Orchestra-rs provides a comprehensive tool calling system that allows LLMs to execute external functions and tools. This enables building powerful AI agents that can interact with APIs, perform calculations, access databases, and more.
+
+### Quick Tool Calling Example
+
+```rust
+use orchestra_core::{
+    llm::LLM,
+    tools::{ToolDefinition, ToolParameter, ToolParameterType, ToolRegistry, ToolExecutor},
+};
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create an LLM instance
+    let llm = LLM::gemini("gemini-2.5-flash");
+
+    // Define a weather tool
+    let weather_tool = ToolDefinition::new(
+        "get_weather",
+        "Get current weather for a location"
+    )
+    .with_parameter(
+        ToolParameter::new("location", ToolParameterType::String)
+            .with_description("The city and country")
+            .required()
+    );
+
+    // Use tools with the LLM
+    let response = llm.prompt_with_tools(
+        "What's the weather like in Paris?",
+        vec![weather_tool]
+    ).await?;
+
+    if response.has_tool_calls() {
+        println!("LLM wants to call: {:?}", response.get_tool_calls());
+    }
+
+    Ok(())
+}
+```
+
+### Built-in Tools
+
+Orchestra-rs comes with several built-in tools ready to use:
+
+```rust
+use orchestra_core::tools::builtin::create_builtin_registry;
+
+// Create a registry with built-in tools
+let registry = create_builtin_registry();
+
+// Available tools:
+// - calculator: Basic arithmetic operations
+// - get_timestamp: Current time in various formats
+// - random_number: Generate random numbers in a range
+```
+
+### Custom Tools
+
+Create your own tools by implementing the `Tool` trait:
+
+```rust
+use orchestra_core::tools::{Tool, ToolDefinition, ToolResult};
+use async_trait::async_trait;
+use serde_json::{json, Value};
+
+#[derive(Debug)]
+struct MyCustomTool {
+    definition: ToolDefinition,
+}
+
+#[async_trait]
+impl Tool for MyCustomTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(&self, arguments: Value) -> Result<ToolResult> {
+        // Your tool logic here
+        Ok(ToolResult::success(json!({"result": "success"})))
+    }
+}
+```
+
+### Tool Execution
+
+Execute tools safely with validation and error handling:
+
+```rust
+use orchestra_core::tools::{ToolExecutor, ToolRegistry};
+
+let registry = ToolRegistry::new();
+// Register your tools...
+
+let executor = ToolExecutor::new(registry)
+    .with_timeout(Duration::from_secs(30))
+    .with_validation(true);
+
+let result = executor.execute("my_tool", json!({
+    "param": "value"
+})).await?;
+```
+
+### Architecture
+
+For a comprehensive understanding of the tool calling system, see:
+
+- **[Tool Calling Architecture](TOOL_CALLING_ARCHITECTURE.md)** - Complete architecture overview with workflows, best practices, and integration patterns
+
+### Examples
+
+Check out the comprehensive examples:
+
+- `cargo run --example tool_calling` - Basic tool calling patterns
+- `cargo run --example advanced_tool_patterns` - Advanced patterns and best practices
+
 ### Roadmap
 
 - [x] Core message and configuration types
 - [x] Google Gemini provider
 - [x] Comprehensive error handling
 - [x] Testing utilities and mock providers
-- [ ] Tool calling support
+- [x] Tool calling support
 - [ ] Streaming responses
 - [ ] Additional providers (OpenAI, Anthropic, etc.)
 - [ ] Agent workflows and chains
