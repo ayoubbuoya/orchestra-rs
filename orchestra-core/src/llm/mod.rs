@@ -46,18 +46,11 @@ use crate::{
     messages::Message,
     model::ModelConfig,
     providers::{
-        Provider,
+        ProviderExt,
         gemini::GeminiProvider,
         types::{ChatResponse, ProviderSource},
     },
 };
-
-/// Enum to hold different provider implementations
-#[derive(Debug)]
-pub enum ProviderInstance {
-    /// Google Gemini provider instance
-    Gemini(GeminiProvider),
-}
 
 /// High-level interface for interacting with Large Language Models.
 ///
@@ -86,8 +79,27 @@ pub enum ProviderInstance {
 pub struct LLM {
     /// The provider source (e.g., Gemini, OpenAI)
     pub provider_source: ProviderSource,
-    /// The provider instance
-    pub provider: ProviderInstance,
+    // The provider instance stored as a trait object.
+    ///
+    /// Explanation:
+    /// - `dyn ProviderExt` is a trait object: it erases the concrete provider type
+    ///   (e.g., `GeminiProvider`) so this field can hold any provider implementation.
+    /// - `Box<dyn ProviderExt>` stores the trait object on the heap. `Box` is a
+    ///   smart pointer that keeps a fixed-size pointer in the struct while the
+    ///   actual provider value lives on the heap. This is necessary because
+    ///   different providers can have different sizes, and struct fields must
+    ///   have a known size at compile time.
+    /// - Using `dyn` enables dynamic dispatch: method calls (like `prompt`)
+    ///   go through a vtable so the correct implementation for the concrete
+    ///   provider runs at runtime.
+    ///
+    /// Trade-offs:
+    /// - Pros: simple runtime polymorphism, one `LLM` type can hold any provider,
+    ///   and you avoid repeating `match` on provider variants.
+    /// - Cons: one level of indirection (heap allocation) and vtable calls (small
+    ///   runtime cost). If you need zero-cost static dispatch, consider making
+    ///   `LLM` generic over the provider type (`LLM<P: ProviderExt>`).
+    pub provider: Box<dyn ProviderExt>,
     /// Model configuration settings
     pub config: ModelConfig,
 }
@@ -97,10 +109,8 @@ impl LLM {
     pub fn new(provider_source: ProviderSource, model_name: String) -> Self {
         let default_model_config = ModelConfig::new(&model_name);
 
-        let provider = match provider_source {
-            ProviderSource::Gemini => {
-                ProviderInstance::Gemini(GeminiProvider::with_default_config())
-            }
+        let provider: Box<dyn ProviderExt> = match provider_source {
+            ProviderSource::Gemini => Box::new(GeminiProvider::with_default_config()),
             _ => panic!("Unsupported provider source"),
         };
 
@@ -191,10 +201,7 @@ impl LLM {
     /// ```
     pub async fn prompt<S: Into<String>>(&self, prompt: S) -> Result<ChatResponse> {
         let config = self.config.clone();
-
-        match &self.provider {
-            ProviderInstance::Gemini(provider) => provider.prompt(config, prompt.into()).await,
-        }
+        self.provider.prompt(config, prompt.into()).await
     }
 
     /// Send a chat message with conversation history.
@@ -236,31 +243,22 @@ impl LLM {
     /// ```
     pub async fn chat(&self, message: Message, history: Vec<Message>) -> Result<ChatResponse> {
         let config = self.config.clone();
-
-        match &self.provider {
-            ProviderInstance::Gemini(provider) => provider.chat(config, message, history).await,
-        }
+        self.provider.chat(config, message, history).await
     }
 
     /// Get the provider name
     pub fn provider_name(&self) -> &'static str {
-        match &self.provider {
-            ProviderInstance::Gemini(_) => "gemini",
-        }
+        self.provider.name()
     }
 
     /// Check if the provider supports streaming
     pub fn supports_streaming(&self) -> bool {
-        match &self.provider {
-            ProviderInstance::Gemini(provider) => provider.supports_streaming(),
-        }
+        self.provider.supports_streaming()
     }
 
     /// Check if the provider supports tools
     pub fn supports_tools(&self) -> bool {
-        match &self.provider {
-            ProviderInstance::Gemini(provider) => provider.supports_tools(),
-        }
+        self.provider.supports_tools()
     }
 }
 
