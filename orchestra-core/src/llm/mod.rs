@@ -111,7 +111,10 @@ impl LLM {
 
         let provider: Box<dyn ProviderExt> = match provider_source {
             ProviderSource::Gemini => Box::new(GeminiProvider::with_default_config()),
-            _ => panic!("Unsupported provider source"),
+            _ => panic!(
+                "Unsupported provider source: {:?}. Supported providers: Gemini",
+                provider_source
+            ),
         };
 
         LLM {
