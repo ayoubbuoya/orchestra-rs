@@ -89,6 +89,16 @@ pub trait ProviderExt: Send + Sync + std::fmt::Debug {
     }
 }
 
+// Short note:
+// We intentionally repeat methods in `Provider` and `ProviderExt`.
+// - `Provider` is the trait implementors use. It has a type for config and
+//   lets implementors write `async fn` easily.
+// - `ProviderExt` is a small, object-safe trait used at runtime. `LLM` stores
+//   providers as `Box<dyn ProviderExt>`, so the trait must be object-safe.
+// The `impl<T> ProviderExt for T where T: Provider` below forwards calls from
+// the object-safe API to the implementor API. This keeps implementations easy
+// to write while letting `LLM` call providers without matching on an enum.
+
 // Blanket implementation: any concrete type that implements the original
 // `Provider` also implements `ProviderExt` by delegating calls. This lets us
 // store different providers behind `Box<dyn ProviderExt>` and call methods
