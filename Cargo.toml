@@ -2,6 +2,20 @@
 name = "orchestra-rs"
 version = "0.1.0"
 edition = "2024"
+description = "An orchestration framework for building AI agents using multiple LLM providers."
+keywords = [
+    "AI",
+    "ai-agents",
+    "gemini",
+    "orchestra",
+    "generative-ai",
+    "open-ai",
+]
+repository = "https://github.com/ayoubbuoya/orchestra-rs"
+readme = "README.md"
+license = "MIT"
+authors = ["Ayoub Amer <ayouub.ameur@gmail.com>"]
+
 
 [dependencies]
 anyhow = "1.0.99"
