@@ -287,7 +287,6 @@ impl LLM {
     ///
     /// This delegates to the provider implementation's `supports_tools` capability flag.
     ///
-    —
     /// # Examples
     ///
     /// ```
