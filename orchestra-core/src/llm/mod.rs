@@ -46,18 +46,11 @@ use crate::{
     messages::Message,
     model::ModelConfig,
     providers::{
-        Provider,
+        ProviderExt,
         gemini::GeminiProvider,
         types::{ChatResponse, ProviderSource},
     },
 };
-
-/// Enum to hold different provider implementations
-#[derive(Debug)]
-pub enum ProviderInstance {
-    /// Google Gemini provider instance
-    Gemini(GeminiProvider),
-}
 
 /// High-level interface for interacting with Large Language Models.
 ///
@@ -86,22 +79,57 @@ pub enum ProviderInstance {
 pub struct LLM {
     /// The provider source (e.g., Gemini, OpenAI)
     pub provider_source: ProviderSource,
-    /// The provider instance
-    pub provider: ProviderInstance,
+    // The provider instance stored as a trait object.
+    ///
+    /// Explanation:
+    /// - `dyn ProviderExt` is a trait object: it erases the concrete provider type
+    ///   (e.g., `GeminiProvider`) so this field can hold any provider implementation.
+    /// - `Box<dyn ProviderExt>` stores the trait object on the heap. `Box` is a
+    ///   smart pointer that keeps a fixed-size pointer in the struct while the
+    ///   actual provider value lives on the heap. This is necessary because
+    ///   different providers can have different sizes, and struct fields must
+    ///   have a known size at compile time.
+    /// - Using `dyn` enables dynamic dispatch: method calls (like `prompt`)
+    ///   go through a vtable so the correct implementation for the concrete
+    ///   provider runs at runtime.
+    ///
+    /// Trade-offs:
+    /// - Pros: simple runtime polymorphism, one `LLM` type can hold any provider,
+    ///   and you avoid repeating `match` on provider variants.
+    /// - Cons: one level of indirection (heap allocation) and vtable calls (small
+    ///   runtime cost). If you need zero-cost static dispatch, consider making
+    ///   `LLM` generic over the provider type (`LLM<P: ProviderExt>`).
+    pub provider: Box<dyn ProviderExt>,
     /// Model configuration settings
     pub config: ModelConfig,
 }
 
 impl LLM {
-    /// Create a new LLM instance with default configuration
+    /// Creates a new LLM backed by the specified provider with a default ModelConfig.
+    ///
+    /// The returned LLM uses a provider implementation chosen from `provider_source` and
+    /// initializes `config` using `ModelConfig::new(&model_name)`.
+    ///
+    /// Panics if `provider_source` is not supported. Currently only `ProviderSource::Gemini` is supported.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let llm = orchestra_core::llm::LLM::new(
+    ///     orchestra_core::llm::ProviderSource::Gemini,
+    ///     "gemini-small".to_string(),
+    /// );
+    /// assert_eq!(llm.get_model_name(), "gemini-small");
+    /// ```
     pub fn new(provider_source: ProviderSource, model_name: String) -> Self {
         let default_model_config = ModelConfig::new(&model_name);
 
-        let provider = match provider_source {
-            ProviderSource::Gemini => {
-                ProviderInstance::Gemini(GeminiProvider::with_default_config())
-            }
-            _ => panic!("Unsupported provider source"),
+        let provider: Box<dyn ProviderExt> = match provider_source {
+            ProviderSource::Gemini => Box::new(GeminiProvider::with_default_config()),
+            _ => panic!(
+                "Unsupported provider source: {:?}. Supported providers: Gemini",
+                provider_source
+            ),
         };
 
         LLM {
@@ -163,18 +191,14 @@ impl LLM {
         &self.config.name
     }
 
-    /// Send a prompt to the LLM and get a response.
+    /// Send a single prompt to the LLM and return the model's response.
     ///
-    /// This is the simplest way to interact with an LLM. It sends a single prompt
-    /// and returns the response.
-    ///
-    /// # Arguments
-    ///
-    /// * `prompt` - The text prompt to send to the LLM
+    /// This sends `prompt` using the LLM's current configuration and delegates to the
+    /// underlying provider implementation. Errors from the provider are propagated.
     ///
     /// # Returns
     ///
-    /// A [`ChatResponse`] containing the LLM's response text.
+    /// A `Result` containing a `ChatResponse` on success.
     ///
     /// # Examples
     ///
@@ -191,25 +215,17 @@ impl LLM {
     /// ```
     pub async fn prompt<S: Into<String>>(&self, prompt: S) -> Result<ChatResponse> {
         let config = self.config.clone();
-
-        match &self.provider {
-            ProviderInstance::Gemini(provider) => provider.prompt(config, prompt.into()).await,
-        }
+        self.provider.prompt(config, prompt.into()).await
     }
 
-    /// Send a chat message with conversation history.
+    /// Send a chat message with conversation history and return the model's response.
     ///
-    /// This method allows you to maintain conversation context by providing
-    /// previous messages in the conversation.
-    ///
-    /// # Arguments
-    ///
-    /// * `message` - The new message to send
-    /// * `history` - Previous messages in the conversation
+    /// The provided `history` is used to establish conversational context for `message`.
+    /// History should be the prior messages in chronological order (oldest first).
     ///
     /// # Returns
     ///
-    /// A [`ChatResponse`] containing the LLM's response text.
+    /// A `Result` containing a [`ChatResponse`] with the model's reply on success.
     ///
     /// # Examples
     ///
@@ -225,10 +241,9 @@ impl LLM {
     ///         Message::assistant("Rust is a systems programming language..."),
     ///     ];
     ///
-    ///     let response = llm.chat(
-    ///         Message::human("What are its main benefits?"),
-    ///         history
-    ///     ).await?;
+    ///     let response = llm
+    ///         .chat(Message::human("What are its main benefits?"), history)
+    ///         .await?;
     ///
     ///     println!("Response: {}", response.text);
     ///     Ok(())
@@ -236,31 +251,52 @@ impl LLM {
     /// ```
     pub async fn chat(&self, message: Message, history: Vec<Message>) -> Result<ChatResponse> {
         let config = self.config.clone();
-
-        match &self.provider {
-            ProviderInstance::Gemini(provider) => provider.chat(config, message, history).await,
-        }
+        self.provider.chat(config, message, history).await
     }
 
-    /// Get the provider name
+    /// Returns the provider's static name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let llm = LLM::gemini("example-model");
+    /// let name = llm.provider_name();
+    /// assert!(!name.is_empty());
+    /// ```
     pub fn provider_name(&self) -> &'static str {
-        match &self.provider {
-            ProviderInstance::Gemini(_) => "gemini",
-        }
+        self.provider.name()
     }
 
-    /// Check if the provider supports streaming
+    /// Returns true if the underlying provider supports streaming.
+    ///
+    /// Delegates the capability check to the configured provider implementation.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Assuming `llm` is an initialized `LLM`:
+    /// if llm.supports_streaming() {
+    ///     // use streaming-specific code path
+    /// }
+    /// ```
     pub fn supports_streaming(&self) -> bool {
-        match &self.provider {
-            ProviderInstance::Gemini(provider) => provider.supports_streaming(),
-        }
+        self.provider.supports_streaming()
     }
 
-    /// Check if the provider supports tools
+    /// Returns true if the underlying provider supports executing or integrating external tools.
+    ///
+    /// This delegates to the provider implementation's `supports_tools` capability flag.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let llm = LLM::gemini("example-model");
+    /// if llm.supports_tools() {
+    ///     // safe to request tool-enabled behaviors
+    /// }
+    /// ```
     pub fn supports_tools(&self) -> bool {
-        match &self.provider {
-            ProviderInstance::Gemini(provider) => provider.supports_tools(),
-        }
+        self.provider.supports_tools()
     }
 }
 
