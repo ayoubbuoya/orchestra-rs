@@ -21,7 +21,7 @@ Orchestra-rs is designed with a modular, type-safe architecture that provides a 
 │  │                    LLM Struct                          │ │
 │  │  - provider_source: ProviderSource                     │ │
 │  │  - model_name: String                                  │ │
-│  │  - provider: ProviderInstance                          │ │
+│  │  - provider: Box<dyn ProviderExt>                      │ │
 │  │  - config: ModelConfig                                 │ │
 │  └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
@@ -68,7 +68,7 @@ The main entry point for users, providing a unified interface across all provide
 
 **Communication Flow:**
 ```
-User Code → LLM::prompt() → ProviderInstance → Specific Provider → External API
+User Code → LLM::prompt() → ProviderSource → ProviderExt implementation → Specific Provider → External API
 ```
 
 **Key Types:**
@@ -76,14 +76,28 @@ User Code → LLM::prompt() → ProviderInstance → Specific Provider → Exter
 pub struct LLM {
     pub provider_source: ProviderSource,
     pub model_name: String,
-    pub provider: ProviderInstance,
+    // The concrete provider implementation is held behind the ProviderExt trait
+    // (trait object) so the LLM can call provider-specific methods polymorphically.
+    pub provider: Box<dyn ProviderExt>,
     pub config: ModelConfig,
 }
 
-pub enum ProviderInstance {
-    Gemini(GeminiProvider),
-    // Future: OpenAI(OpenAIProvider),
+// Provider selection is declared by ProviderSource. Concrete providers implement
+// a common trait (ProviderExt / Provider) and are instantiated when building
+// the LLM. This avoids a central enum that must be updated for every new
+// provider.
+
+pub enum ProviderSource {
+    Gemini,
+    Mock,
+    // Future: OpenAI, Anthropic, etc.
 }
+
+// Example instantiation (conceptual):
+// let provider: Box<dyn ProviderExt> = match provider_source {
+//     ProviderSource::Gemini => Box::new(GeminiProvider::with_default_config()),
+//     ProviderSource::Mock => Box::new(MockProvider::new(mock_config)),
+// };
 ```
 
 ### 2. Message System (`src/messages/mod.rs`)
@@ -187,7 +201,7 @@ LLM::prompt()
 LLM::chat()
     │ (message, empty_history)
     ▼
-ProviderInstance::Gemini
+ProviderSource::Gemini (instantiated as a ProviderExt implementation)
     │ provider.chat(config, message, history)
     ▼
 GeminiProvider::chat()
@@ -322,21 +336,47 @@ MockConfig::new()
    }
    ```
 
-3. **Add to ProviderInstance enum:**
-   ```rust
-   pub enum ProviderInstance {
-       Gemini(GeminiProvider),
-       NewProvider(NewProvider),
-   }
-   ```
+3. **Provider selection and instantiation (current design):**
 
-4. **Update LLM constructor:**
-   ```rust
-   match provider_source {
-       ProviderSource::Gemini => ProviderInstance::Gemini(...),
-       ProviderSource::NewProvider => ProviderInstance::NewProvider(...),
-   }
-   ```
+Instead of a large enum that owns every concrete provider, the codebase uses a
+`ProviderSource` enum to declare which provider to use and trait objects (the
+`ProviderExt` / `Provider` trait) for the concrete implementation. This keeps
+the LLM API stable while allowing new providers to be added without editing a
+centralized enum with every change.
+
+Example steps to add a new provider:
+
+1. Create provider module:
+```
+src/providers/new_provider/
+├── mod.rs
+├── impl.rs
+└── types.rs
+```
+
+2. Implement the provider trait (ProviderExt / Provider) for the provider type:
+```rust
+#[async_trait]
+impl Provider for NewProvider {
+    type Config = NewProviderConfig;
+    // ... implement required methods
+}
+```
+
+3. Add a variant to `ProviderSource` and provide an instantiation path when
+   constructing the LLM (or use a factory helper). Example:
+```rust
+pub enum ProviderSource { Gemini, NewProvider, /* ... */ }
+
+let provider: Box<dyn ProviderExt> = match provider_source {
+    ProviderSource::Gemini => Box::new(GeminiProvider::with_default_config()),
+    ProviderSource::NewProvider => Box::new(NewProvider::from_config(cfg)),
+};
+```
+
+This pattern keeps provider wiring local to the constructor or a small factory
+module and avoids a monolithic provider enum that must be edited for every new
+implementation.
 
 ### Adding New Message Types
 
