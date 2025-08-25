@@ -828,7 +828,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "orchestra-core"
+name = "orchestra-rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",

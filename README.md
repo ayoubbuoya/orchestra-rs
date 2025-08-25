@@ -26,15 +26,17 @@ The goal of **Orchestra-rs** is to be the `LangChain` of the Rust ecosystem. We 
 Add Orchestra-rs to your `Cargo.toml`:
 
 ```toml
+
 [dependencies]
-orchestra-core = { path = "orchestra-core" }  # Will be published to crates.io soon
+orchestra-rs = { path = "." }  # Will be published to crates.io soon
 tokio = { version = "1.0", features = ["full"] }
 ```
 
 ### Basic Usage
 
+
 ```rust
-use orchestra_core::{
+use orchestra_rs::{
     llm::LLM,
     providers::types::ProviderSource,
     messages::Message,
@@ -59,8 +61,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Advanced Configuration
 
-````rust
-use orchestra_core::{
+
+```rust
+use orchestra_rs::{
     llm::LLM,
     providers::types::ProviderSource,
     model::ModelConfig,
@@ -89,8 +92,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Chat with History
 
+
 ```rust
-use orchestra_core::{
+use orchestra_rs::{
     llm::LLM,
     messages::Message,
 };
@@ -118,8 +122,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Using Presets
 
+
 ```rust
-use orchestra_core::{
+use orchestra_rs::{
     llm::LLM,
     providers::types::ProviderSource,
 };
@@ -190,7 +195,8 @@ Orchestra-rs is built with a modular architecture:
 Orchestra-rs provides comprehensive error handling with context:
 
 ```rust
-use orchestra_core::{error::OrchestraError, llm::LLM};
+
+use orchestra_rs::{error::OrchestraError, llm::LLM};
 
 #[tokio::main]
 async fn main() {
@@ -214,7 +220,8 @@ async fn main() {
 Orchestra-rs includes comprehensive testing utilities:
 
 ```rust
-use orchestra_core::providers::mock::{MockProvider, MockConfig};
+
+use orchestra_rs::providers::mock::{MockProvider, MockConfig};
 
 #[tokio::test]
 async fn test_my_ai_function() {
