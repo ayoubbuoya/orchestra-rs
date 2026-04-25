@@ -1,261 +1,386 @@
 # Orchestra-rs
 
-[![crates.io](https://img.shields.io/crates/v/orchestra-rs.svg?style=flat-square)](https://crates.io/crates/orchestra-rs) <!-- TODO: Update when published -->
-[![docs.rs](https://img.shields.io/docsrs/orchestra-rs?style=flat-square)](https://docs.rs/orchestra-rs) <!-- TODO: Update when published -->
-[![CI](https://img.shields.io/github/actions/workflow/status/YourUsername/orchestra-rs/rust.yml?branch=main&style=flat-square)](https://github.com/YourUsername/orchestra-rs/actions) <!-- TODO: Update with username and repo -->
-[![License](https://img.shields.io/crates/l/orchestra-rs.svg?style=flat-square)](https://github.com/YourUsername/orchestra-rs/blob/main/LICENSE) <!-- TODO: Update with  username and repo -->
+[![crates.io](https://img.shields.io/crates/v/orchestra-rs.svg?style=flat-square)](https://crates.io/crates/orchestra-rs)
+[![docs.rs](https://img.shields.io/docsrs/orchestra-rs?style=flat-square)](https://docs.rs/orchestra-rs)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
-A Rust crate for building AI agent workflows and applications. Orchestra-rs provides a powerful, type-safe framework for orchestrating production-ready applications powered by Large Language Models (LLMs).
+A provider-agnostic orchestration framework for building AI-powered applications in Rust. Unify any LLM behind a single interface — switch providers by changing a string.
 
-## Vision
+## Why Orchestra-rs?
 
-The goal of **Orchestra-rs** is to be the `LangChain` of the Rust ecosystem. We aim to provide a composable, safe, and efficient set of tools to chain together calls to LLMs, APIs, and other data sources. By leveraging Rust's powerful type system and performance, Orchestra-rs empowers developers to build reliable and scalable AI applications and intelligent agents with confidence.
+Every LLM provider has a different API, different message format, different streaming semantics, and different error handling. Orchestra-rs normalizes all of that behind a clean, type-safe, async Rust interface.
 
-## Features
-
-- 🚀 **Type-safe LLM interactions** - Leverage Rust's type system for reliable AI applications
-- 🔌 **Multiple provider support** - Currently supports Google Gemini, with more providers coming
-- 🛠️ **Flexible configuration** - Builder patterns and validation for model configurations
-- 📝 **Rich message types** - Support for text, mixed content, and future tool calling
-- 🧪 **Comprehensive testing** - Built-in mock providers and extensive test coverage
-- ⚡ **Async/await support** - Built for modern async Rust applications
-- 🔒 **Error handling** - Comprehensive error types with context
+- **One interface, any provider** — Gemini, OpenAI, Anthropic, Ollama, or your own. Implement the `Provider` trait once and it just works.
+- **Zero-cost abstractions** — Feature-gated providers. Only compile what you use.
+- **Progressive complexity** — One-liner for simple prompts. Full control when you need it.
+- **Streaming built-in** — Unified `StreamEvent` type across all providers.
+- **Tool calling** — Define tools, pass them in, handle results. Same API regardless of provider.
+- **Ergonomic API** — Builder patterns, environment variable auto-detection, sensible defaults.
 
 ## Quick Start
 
-Add Orchestra-rs to your `Cargo.toml`:
+Add to your `Cargo.toml`:
 
 ```toml
-
 [dependencies]
-orchestra-rs = { path = "." }  # Will be published to crates.io soon
-tokio = { version = "1.0", features = ["full"] }
+orchestra-rs = { version = "0.2", features = ["gemini"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
-### Basic Usage
+Set your API key:
 
+```bash
+export GEMINI_API_KEY=your-api-key
+```
+
+Start using it:
 
 ```rust
-use orchestra_rs::{
-    llm::LLM,
-    providers::types::ProviderSource,
-    messages::Message,
-    model::ModelConfig,
-};
+use orchestra_rs::{Orchestra, providers::GeminiProvider};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Set your API key as an environment variable
-    std::env::set_var("GEMINI_API_KEY", "your-api-key-here");
+    let client = Orchestra::new()
+        .with_provider(GeminiProvider::from_env()?);
 
-    // Create an LLM instance with Gemini
-    let llm = LLM::gemini("gemini-2.5-flash");
-
-    // Simple prompt
-    let response = llm.prompt("Hello, how are you today?").await?;
-    println!("Response: {}", response.text);
+    let response = client.chat("gemini-2.5-pro", "Explain Rust ownership in one sentence.").await?;
+    println!("{}", response.message);
 
     Ok(())
 }
 ```
 
-### Advanced Configuration
+That's it. One line to create the client, one line to chat.
 
-
-```rust
-use orchestra_rs::{
-    llm::LLM,
-    providers::types::ProviderSource,
-    model::ModelConfig,
-};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create a custom model configuration
-    let config = ModelConfig::new("gemini-2.5-flash")
-        .with_system_instruction("You are a helpful coding assistant")
-        .with_temperature(0.7)?
-        .with_top_p(0.9)?
-        .with_max_tokens(1000)
-        .with_stop_sequence("```");
-
-    // Create LLM with custom configuration
-    let llm = LLM::new(ProviderSource::Gemini, "gemini-2.5-flash".to_string())
-        .with_custom_config(config);
-
-    let response = llm.prompt("Write a simple Rust function").await?;
-    println!("Response: {}", response.text);
-
-    Ok(())
-}
-````
+## Usage
 
 ### Chat with History
 
-
 ```rust
-use orchestra_rs::{
-    llm::LLM,
-    messages::Message,
-};
+use orchestra_rs::{Orchestra, Message, providers::GeminiProvider};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let llm = LLM::gemini("gemini-2.5-flash");
+    let client = Orchestra::new()
+        .with_provider(GeminiProvider::from_env()?);
 
-    // Build conversation history
-    let history = vec![
-        Message::human("Hi, I'm working on a Rust project"),
-        Message::assistant("Great! I'd be happy to help with your Rust project. What are you working on?"),
+    let messages = vec![
+        Message::system("You are a concise coding assistant."),
+        Message::user("What is Result<T, E> in Rust?"),
+        Message::assistant("Result<T, E> is an enum representing either success (Ok(T)) or failure (Err(E))."),
+        Message::user("How is it different from Option<T>?"),
     ];
 
-    // Continue the conversation
-    let response = llm.chat(
-        Message::human("I need help with error handling"),
-        history
-    ).await?;
+    let response = client.chat_with("gemini-2.5-pro", &messages, &Default::default()).await?;
+    println!("{}", response.message);
 
-    println!("Response: {}", response.text);
     Ok(())
 }
 ```
 
-### Using Presets
-
+### Full Configuration
 
 ```rust
-use orchestra_rs::{
-    llm::LLM,
-    providers::types::ProviderSource,
-};
+use orchestra_rs::{Orchestra, RequestConfig, providers::GeminiProvider};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Conservative settings (lower temperature, more focused)
-    let conservative_llm = LLM::conservative(
-        ProviderSource::Gemini,
-        "gemini-2.5-flash".to_string()
-    );
+    let client = Orchestra::new()
+        .with_provider(GeminiProvider::from_env()?);
 
-    // Creative settings (higher temperature, more diverse)
-    let creative_llm = LLM::creative(
-        ProviderSource::Gemini,
-        "gemini-2.5-flash".to_string()
-    );
+    let config = RequestConfig {
+        temperature: Some(0.7),
+        top_p: Some(0.9),
+        max_tokens: Some(2048),
+        stop_sequences: vec!["```".into()],
+        ..Default::default()
+    };
 
-    // Balanced settings (moderate temperature)
-    let balanced_llm = LLM::balanced(
-        ProviderSource::Gemini,
-        "gemini-2.5-flash".to_string()
-    );
-
-    let response = conservative_llm.prompt("Explain Rust ownership").await?;
-    println!("Conservative response: {}", response.text);
+    let response = client.chat_with("gemini-2.5-pro", &messages, &config).await?;
+    println!("Tokens used: {}", response.usage.total_tokens);
 
     Ok(())
 }
 ```
+
+### Streaming
+
+```rust
+use orchestra_rs::{Orchestra, StreamEvent, providers::GeminiProvider};
+use futures::StreamExt;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Orchestra::new()
+        .with_provider(GeminiProvider::from_env()?);
+
+    let mut stream = client.chat_stream("gemini-2.5-pro", "Tell me a short story.").await?;
+
+    while let Some(event) = stream.next().await {
+        match event? {
+            StreamEvent::Delta { text } => print!("{text}"),
+            StreamEvent::Finish(reason) => println!("\nFinished: {reason:?}"),
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+```
+
+### Tool Calling
+
+```rust
+use orchestra_rs::{Orchestra, RequestConfig, Tool, Message, Content, providers::GeminiProvider};
+use serde_json::{json, Value};
+
+struct WeatherTool;
+
+#[async_trait::async_trait]
+impl Tool for WeatherTool {
+    fn name(&self) -> &str { "get_weather" }
+    fn description(&self) -> &str { "Get the current weather for a location" }
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "location": { "type": "string" } },
+            "required": ["location"]
+        })
+    }
+    async fn execute(&self, input: Value) -> Result<Value, orchestra_rs::OrchestraError> {
+        let location = input["location"].as_str().unwrap();
+        Ok(json!({ "temperature": 22, "condition": "sunny", "location": location }))
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Orchestra::new()
+        .with_provider(GeminiProvider::from_env()?);
+
+    let config = RequestConfig {
+        tools: vec![std::sync::Arc::new(WeatherTool)],
+        ..Default::default()
+    };
+
+    let mut messages = vec![Message::user("What's the weather in Tokyo?")];
+
+    let response = client.chat_with("gemini-2.5-pro", &messages, &config).await?;
+    messages.push(response.message.clone());
+
+    // Handle tool calls in the response
+    for content in response.message.content_parts() {
+        if let Content::ToolCall { id, name, input } = content {
+            let result = /* execute tool by name */ json!({"temperature": 22});
+            messages.push(Message::tool_result(id, name, result.to_string()));
+        }
+    }
+
+    // Send tool results back
+    let final_response = client.chat_with("gemini-2.5-pro", &messages, &config).await?;
+    println!("{}", final_response.message);
+
+    Ok(())
+}
+```
+
+### Multiple Providers
+
+```rust
+use orchestra_rs::{Orchestra, providers::{GeminiProvider, OpenAIProvider}};
+
+let client = Orchestra::new()
+    .with_provider(GeminiProvider::from_env()?)
+    .with_provider(OpenAIProvider::from_env()?);
+
+// Use any registered provider by model name
+let gemini_response = client.chat("gemini-2.5-pro", "Hello").await?;
+let openai_response = client.chat("gpt-4o", "Hello").await?;
+```
+
+### Testing with Mocks
+
+```rust
+use orchestra_rs::{Orchestra, providers::MockProvider};
+
+#[tokio::test]
+async fn test_my_logic() {
+    let mock = MockProvider::new().with_response("Expected response");
+    let client = Orchestra::new().with_provider(mock);
+
+    let response = client.chat("any-model", "Hello").await.unwrap();
+    assert_eq!(response.message.text(), "Expected response");
+}
+```
+
+## Feature Flags
+
+Only compile the providers you need:
+
+```toml
+[dependencies]
+orchestra-rs = { version = "0.2", features = ["gemini"] }
+```
+
+| Feature | Description |
+|---------|-------------|
+| `gemini` | Google Gemini provider |
+| `openai` | OpenAI provider |
+| `anthropic` | Anthropic Claude provider |
+| `mock` | Mock provider for testing |
+| `streaming` | Streaming support (enabled by default) |
 
 ## Supported Providers
 
 ### Google Gemini
 
-Currently supported models:
+```toml
+orchestra-rs = { version = "0.2", features = ["gemini"] }
+```
 
-- `gemini-2.5-flash-lite`
-- `gemini-2.5-pro`
-- `gemini-2.5-flash`
-- `gemini-2.0-flash-lite`
-- `gemini-2.0-flash`
-- `gemini-1.5-pro`
+```bash
+export GEMINI_API_KEY=your-api-key
+```
 
-**Setup:**
+Supports: gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.0-flash, gemini-2.0-flash-lite, gemini-1.5-pro, and any other model string Gemini accepts.
 
-1. Get an API key from [Google AI Studio](https://aistudio.google.com/)
-2. Set the environment variable: `GEMINI_API_KEY=your-api-key`
+### OpenAI
 
-### Coming Soon
+```toml
+orchestra-rs = { version = "0.2", features = ["openai"] }
+```
 
-- OpenAI GPT models
-- Anthropic Claude
-- Local models via Ollama
-- Azure OpenAI
+```bash
+export OPENAI_API_KEY=your-api-key
+```
+
+### Anthropic Claude
+
+```toml
+orchestra-rs = { version = "0.2", features = ["anthropic"] }
+```
+
+```bash
+export ANTHROPIC_API_KEY=your-api-key
+```
+
+## Implementing a Custom Provider
+
+Any provider is just an implementation of the `Provider` trait:
+
+```rust
+use orchestra_rs::provider::Provider;
+use orchestra_rs::core::{Message, ChatResponse, RequestConfig, StreamEvent, ModelInfo};
+use async_trait::async_trait;
+use std::pin::Pin;
+use futures::Stream;
+
+pub struct MyCustomProvider {
+    api_key: String,
+}
+
+#[async_trait]
+impl Provider for MyCustomProvider {
+    fn id(&self) -> &str { "my-provider" }
+
+    async fn chat(
+        &self,
+        model: &str,
+        messages: &[Message],
+        config: &RequestConfig,
+    ) -> Result<ChatResponse, orchestra_rs::OrchestraError> {
+        // Call your API, convert the response
+        todo!()
+    }
+
+    async fn chat_stream(
+        &self,
+        model: &str,
+        messages: &[Message],
+        config: &RequestConfig,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, orchestra_rs::OrchestraError>> + Send>>, orchestra_rs::OrchestraError> {
+        // Return a streaming response
+        todo!()
+    }
+
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, orchestra_rs::OrchestraError> {
+        todo!()
+    }
+
+    fn supports_tools(&self) -> bool { false }
+    fn supports_streaming(&self) -> bool { true }
+}
+
+// Register it like any built-in provider
+let client = Orchestra::new()
+    .with_provider(MyCustomProvider::new("key"));
+```
 
 ## Architecture
 
-Orchestra-rs is built with a modular architecture:
+```
+src/
+├── core/                    # Stable types — messages, responses, errors, config
+│   ├── message.rs           # Message, Role, Content
+│   ├── response.rs          # ChatResponse, StreamEvent, Usage, FinishReason
+│   ├── tool.rs              # Tool trait, ToolDefinition
+│   ├── config.rs            # RequestConfig
+│   └── error.rs             # OrchestraError
+│
+├── provider/                # The abstraction layer
+│   ├── traits.rs            # Provider trait
+│   └── stream.rs            # Unified streaming types
+│
+├── client.rs                # Orchestra — the user-facing client
+│
+└── providers/               # Built-in implementations (feature-gated)
+    ├── gemini/              # Google Gemini
+    ├── openai/              # OpenAI
+    └── mock/                # Testing mocks
+```
 
-- **Core Types**: Message types, model configurations, and error handling
-- **Providers**: Pluggable LLM provider implementations
-- **LLM Interface**: High-level interface for interacting with any provider
-- **Configuration**: Flexible configuration with validation and presets
+**Core principle:** The `Provider` trait is the only contract. Every provider converts to/from core types internally. Adding a new provider never changes core code.
 
 ## Error Handling
 
-Orchestra-rs provides comprehensive error handling with context:
-
 ```rust
+use orchestra_rs::OrchestraError;
 
-use orchestra_rs::{error::OrchestraError, llm::LLM};
-
-#[tokio::main]
-async fn main() {
-    let llm = LLM::gemini("gemini-2.5-flash");
-
-    match llm.prompt("Hello").await {
-        Ok(response) => println!("Success: {}", response.text),
-        Err(OrchestraError::ApiKey { message }) => {
-            eprintln!("API key error: {}", message);
-        },
-        Err(OrchestraError::Provider { provider, message }) => {
-            eprintln!("Provider {} error: {}", provider, message);
-        },
-        Err(e) => eprintln!("Other error: {}", e),
+match client.chat("gemini-2.5-pro", "Hello").await {
+    Ok(response) => println!("{}", response.message),
+    Err(OrchestraError::Auth { provider, reason }) => {
+        eprintln!("Auth failed for {provider}: {reason}");
     }
+    Err(OrchestraError::RateLimited { provider, retry_after_ms }) => {
+        if let Some(ms) = retry_after_ms {
+            eprintln!("Rate limited by {provider}, retry after {ms}ms");
+        }
+    }
+    Err(OrchestraError::ModelNotFound { provider, model }) => {
+        eprintln!("Model {model} not found on {provider}");
+    }
+    Err(e) => eprintln!("Error: {e}"),
 }
 ```
 
-## Testing
+## Roadmap
 
-Orchestra-rs includes comprehensive testing utilities:
-
-```rust
-
-use orchestra_rs::providers::mock::{MockProvider, MockConfig};
-
-#[tokio::test]
-async fn test_my_ai_function() {
-    let mock_config = MockConfig::new()
-        .with_responses(vec!["Mocked response 1", "Mocked response 2"]);
-
-    let provider = MockProvider::new(mock_config);
-    // Use the mock provider in your tests
-}
-```
-
-## Architecture Documentation
-
-For a detailed overview of the library's architecture, please refer to the [architecture documentation](architecture.md).
-
-## Project Status
-
-**🌱 Early Development Stage**
-
-Orchestra-rs is in active development. The core APIs are stabilizing, but may still change. This is a great time to get involved and help shape the future of the framework.
-
-### Roadmap
-
-- [x] Core message and configuration types
+- [x] Core types (Message, Response, Config, Error)
+- [x] Provider trait abstraction
 - [x] Google Gemini provider
-- [x] Comprehensive error handling
-- [x] Testing utilities and mock providers
-- [ ] Tool calling support
-- [ ] Streaming responses
-- [ ] Additional providers (OpenAI, Anthropic, etc.)
-- [ ] Agent workflows and chains
-- [ ] Memory and context management
-- [ ] Plugin system
+- [x] Streaming support
+- [x] Tool calling
+- [x] Mock provider for testing
+- [ ] OpenAI provider
+- [ ] Anthropic Claude provider
+- [ ] Ollama / local model provider
+- [ ] Middleware (retry, logging, caching)
+- [ ] Agent loop (automatic tool calling)
+
+## Contributing
+
+Contributions are welcome. Please open an issue first to discuss what you'd like to change.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+[MIT](LICENSE)
